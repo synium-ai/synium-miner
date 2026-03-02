@@ -22,7 +22,7 @@ const RPC_URL = "https://sepolia.drpc.org";
 // ABIs
 const SYN_ABI = [
     "function getEstimatedReward() view returns (uint256)",
-    "function claim(bytes signature, uint256 expireAt, tuple(address currency0, address currency1, uint24 fee, uint24 marginFee) poolKey, uint256 amountEthMin, uint256 amountSynMin) external payable",
+    "function claim(bytes signature, tuple(address currency0, address currency1, uint24 fee, uint24 marginFee) poolKey, uint256 amountEthMin, uint256 amountSynMin) external payable",
     "function claimVested() external",
     "function vestingSchedules(address) view returns (uint256 totalLocked, uint256 released, uint256 startTime, uint256 endTime, uint256 lpTokenId)",
     "function balanceOf(address) view returns (uint256)"
@@ -88,7 +88,6 @@ export async function synium_mine({ answer }) {
 
     // 1. Verify Off-chain
     let signature;
-    let expireAt;
     try {
         const res = await axios.post(`${VERIFIER_URL}/verify`, {
             wallet_address: wallet.address,
@@ -96,7 +95,6 @@ export async function synium_mine({ answer }) {
         });
         if (!res.data.success) return JSON.stringify({ success: false, error: "Verification Failed" });
         signature = res.data.signature;
-        expireAt = res.data.expireAt; // Capture Expiry
     } catch (e) {
         return JSON.stringify({ success: false, error: e.response?.data?.detail || e.message });
     }
@@ -157,7 +155,7 @@ export async function synium_mine({ answer }) {
         }
 
         const tx = await synContract.claim(
-            signature, expireAt, poolKey, minEth, minSyn, 
+            signature, poolKey, minEth, minSyn, 
             { value: msgValue }
         );
         const receipt = await tx.wait();
