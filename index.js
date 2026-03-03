@@ -17,7 +17,8 @@ dotenv.config({ path: envPath });
 const VERIFIER_URL = "http://136.111.82.79";
 const SYN_CONTRACT = "0xc1D9dCa8e9bb2E78098468f93f705493acFE9210";
 const LIKWID_HELPER = "0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013";
-const RPC_URL = "https://sepolia.drpc.org";
+// Use a more reliable public RPC
+const RPC_URL = "https://ethereum-sepolia-rpc.publicnode.com"; 
 
 // ABIs
 const SYN_ABI = [
@@ -119,11 +120,17 @@ export async function synium_mine({ answer }) {
         [[poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.marginFee]]
     );
     const poolId = keccak256(encoded);
+    console.log("   Debug PoolId:", poolId);
 
     // 3. Estimate & Check Balance
-    const estReward = await synContract.getEstimatedReward();
-    // Use 2%
-    const liquidPart = estReward * 200n / 10000n; 
+    let estReward = 0n;
+    let liquidPart = 0n;
+    try {
+        estReward = await synContract.getEstimatedReward();
+        liquidPart = estReward * 200n / 10000n; 
+    } catch (e) {
+        console.log("   ⚠️ Failed to get reward estimate, using fallback 0.");
+    }
 
     // Helper Call
     const helper = new ethers.Contract(LIKWID_HELPER, HELPER_ABI, provider);
@@ -133,14 +140,23 @@ export async function synium_mine({ answer }) {
     let minSyn = 0n;
     
     try {
+        console.log("   Querying Pool State...");
         const state = await helper.getPoolStateInfo(poolId);
-        if (state.pairReserve1 > 0n) {
-            msgValue = liquidPart * BigInt(state.pairReserve0) / BigInt(state.pairReserve1);
+        
+        // Ethers v6 Result object handling
+        const res0 = state.pairReserve0 || state[0]; 
+        const res1 = state.pairReserve1 || state[1];
+        
+        console.log(`   Reserves: ${res0} ETH / ${res1} SYN`);
+
+        if (res1 > 0n) {
+            msgValue = liquidPart * BigInt(res0) / BigInt(res1);
             
             const bal = await provider.getBalance(wallet.address);
-            if (bal >= msgValue + ethers.parseEther("0.005")) { // Gas buffer
+            console.log(`   Cost: ${ethers.formatEther(msgValue)} ETH, Bal: ${ethers.formatEther(bal)}`);
+            
+            if (bal >= msgValue + ethers.parseEther("0.005")) { 
                 strategy = "Forced Liquidity (LP)";
-                 // Slippage 0.5%
                  minEth = msgValue * 995n / 1000n;
                  minSyn = liquidPart * 995n / 1000n;
             } else {
@@ -148,27 +164,20 @@ export async function synium_mine({ answer }) {
             }
         }
     } catch (e) {
-        console.log("Helper error (pool likely empty/new):", e.message);
+        console.log("   ❌ Helper error:", e.message);
+        // Fallback to burn
     }
 
     // 4. Send TX
     try {
         // Claim Mine
-        // Slippage 0.5%
-        if (msgValue > 0n) {
-             minEth = msgValue * 995n / 1000n;
-             minSyn = liquidPart * 995n / 1000n;
-        }
-
         const tx = await synContract.claim(
             signature, nonce, poolKey, minEth, minSyn, 
             { value: msgValue }
         );
+        console.log(`   Tx Sent: ${tx.hash}`);
         const receipt = await tx.wait();
         
-        // Claim Vested (Best effort)
-        try { await (await synContract.claimVested()).wait(); } catch(e) {}
-
         return JSON.stringify({
             success: true,
             hash: receipt.hash,
@@ -177,7 +186,9 @@ export async function synium_mine({ answer }) {
             cost: ethers.formatEther(msgValue)
         }, null, 2);
     } catch (e) {
-        return JSON.stringify({ success: false, error: e.message });
+        // Parse error reason if possible
+        const reason = e.reason || e.shortMessage || e.message;
+        return JSON.stringify({ success: false, error: reason });
     }
 }
 
