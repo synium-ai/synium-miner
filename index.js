@@ -29,7 +29,7 @@ const SYN_ABI = [
     "function balanceOf(address) view returns (uint256)"
 ];
 const HELPER_ABI = [
-    "function getPoolStateInfo(bytes32 poolId) view returns (tuple(uint128 pairReserve0, uint128 pairReserve1))"
+    "function getPoolStateInfo(bytes32 poolId) view returns (tuple(uint128 totalSupply, uint32 lastUpdated, uint24 lpFee, uint24 marginFee, uint24 protocolFee, uint128 realReserve0, uint128 realReserve1, uint128 mirrorReserve0, uint128 mirrorReserve1, uint128 pairReserve0, uint128 pairReserve1, uint128 truncatedReserve0, uint128 truncatedReserve1, uint128 lendReserve0, uint128 lendReserve1, uint128 interestReserve0, uint128 interestReserve1, int128 insuranceFund0, int128 insuranceFund1, uint256 borrow0CumulativeLast, uint256 borrow1CumulativeLast, uint256 deposit0CumulativeLast, uint256 deposit1CumulativeLast))"
 ];
 
 // --- Tool 1: Check Status & Get Challenge ---
