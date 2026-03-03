@@ -96,6 +96,10 @@ export async function synium_mine({ answer }) {
         });
         if (!res.data.success) return JSON.stringify({ success: false, error: "Verification Failed" });
         signature = res.data.signature;
+        // Fix: Ensure 0x prefix for ethers.js compatibility
+        if (!signature.startsWith('0x')) {
+            signature = '0x' + signature;
+        }
         nonce = res.data.nonce;
     } catch (e) {
         return JSON.stringify({ success: false, error: e.response?.data?.detail || e.message });
