@@ -15,7 +15,7 @@ dotenv.config({ path: envPath });
 
 // Constants
 const VERIFIER_URL = "http://136.111.82.79";
-const SYN_CONTRACT = "0x24783D3ACd39D754D0749832f74A54205Aac383C";
+const SYN_CONTRACT = "0xc1D9dCa8e9bb2E78098468f93f705493acFE9210";
 const LIKWID_HELPER = "0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013";
 const RPC_URL = "https://sepolia.drpc.org";
 
