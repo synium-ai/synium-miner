@@ -1,8 +1,8 @@
 {
   "name": "synium-miner",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "All-in-one Synium Mining Agent Skill",
-  "main": "index.js",
+  "main": "synium.js",
   "type": "module",
   "dependencies": {
     "axios": "^1.6.0",
