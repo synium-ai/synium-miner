@@ -143,12 +143,9 @@ export async function synium_mine({ answer }) {
         console.log("   Querying Pool State...");
         const state = await helper.getPoolStateInfo(poolId);
         
-        // Ethers v6 Result object handling - Use Index to be safe
-        // Struct order: totalSupply, lastUpdated, lpFee, marginFee, protocolFee, 
-        // real0, real1, mirror0, mirror1, pairReserve0, pairReserve1
-        // pairReserve0 is at index 9, pairReserve1 is at index 10
-        const res0 = BigInt(state[9]); 
-        const res1 = BigInt(state[10]);
+        // Use Property Names (ABI is now fully matched)
+        const res0 = BigInt(state.pairReserve0); 
+        const res1 = BigInt(state.pairReserve1);
         
         console.log(`   Reserves: ${res0} ETH / ${res1} SYN`);
 
