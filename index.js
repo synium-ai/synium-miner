@@ -143,14 +143,28 @@ export async function synium_mine({ answer }) {
         console.log("   Querying Pool State...");
         const state = await helper.getPoolStateInfo(poolId);
         
-        // Ethers v6 Result object handling
-        const res0 = state.pairReserve0 || state[0]; 
-        const res1 = state.pairReserve1 || state[1];
+        // Ethers v6 Result object handling - Use Index to be safe
+        // Struct order: totalSupply, lastUpdated, lpFee, marginFee, protocolFee, 
+        // real0, real1, mirror0, mirror1, pairReserve0, pairReserve1
+        // pairReserve0 is at index 9, pairReserve1 is at index 10
+        const res0 = BigInt(state[9]); 
+        const res1 = BigInt(state[10]);
         
         console.log(`   Reserves: ${res0} ETH / ${res1} SYN`);
 
         if (res1 > 0n) {
-            msgValue = liquidPart * BigInt(res0) / BigInt(res1);
+            let ethNeeded = liquidPart * res0 / res1;
+            
+            // Sanity Check: If calculation demands > 10 ETH for a small reward, reserves might be flipped or wrong
+            if (ethNeeded > ethers.parseEther("10")) {
+                 console.log("   ⚠️ Anomalous ETH cost detected (>10 ETH). Attempting reserve flip...");
+                 if (res0 > 0n) {
+                     ethNeeded = liquidPart * res1 / res0;
+                     console.log(`   New Cost (Flipped): ${ethers.formatEther(ethNeeded)} ETH`);
+                 }
+            }
+
+            msgValue = ethNeeded;
             
             const bal = await provider.getBalance(wallet.address);
             console.log(`   Cost: ${ethers.formatEther(msgValue)} ETH, Bal: ${ethers.formatEther(bal)}`);
