@@ -19,7 +19,7 @@ const WALLET_FILE = path.join(CONFIG.HOME, '.openclaw', '.synium_wallet.json');
 const ABIS = {
     SYN: [
         "function getEstimatedReward() view returns (uint256)",
-        "function claim(bytes signature, uint256 nonce, tuple(address currency0, address currency1, uint24 fee, uint24 marginFee) poolKey) external payable",
+        "function claim(bytes signature, uint256 nonce) external payable",
         "function vestingSchedules(address) view returns (uint256 totalLocked, uint256 released, uint256 startTime, uint256 endTime, uint256 lpTokenId)",
         "function balanceOf(address) view returns (uint256)",
         "function timeUntilNextClaim(address user) view returns (uint256)"
@@ -98,7 +98,7 @@ async function mine(answer) {
     const wallet = await getWallet(provider);
     const contract = new ethers.Contract(CONFIG.CONTRACT, ABIS.SYN, wallet);
 
-    // Check cooldown first
+    // Check cooldown
     try {
         const cooldown = await contract.timeUntilNextClaim(wallet.address);
         if (cooldown > 0n) {
@@ -121,6 +121,7 @@ async function mine(answer) {
     } catch(e) { return console.log("❌ Verify Error:", e.response?.data || e.message); }
 
     // 2. DeFi Logic: Calculate LP Requirement
+    // Note: PoolKey construction is solely for PoolId calculation now. Contract has it built-in.
     const poolKey = { currency0: "0x0000000000000000000000000000000000000000", currency1: CONFIG.CONTRACT, fee: 3000, marginFee: 3000 };
     const abiCoder = AbiCoder.defaultAbiCoder();
     const pid = keccak256(abiCoder.encode(["tuple(address currency0, address currency1, uint24 fee, uint24 marginFee)"], [[poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.marginFee]]));
@@ -161,8 +162,8 @@ async function mine(answer) {
     // 3. Submit Transaction
     try {
         console.log(`🚀 Submitting Claim... Strategy: ${strategy}`);
-        // No slippage params anymore
-        const tx = await contract.claim(sig, nonce, poolKey, { value: msgValue });
+        // New: claim(signature, nonce) - No poolKey params!
+        const tx = await contract.claim(sig, nonce, { value: msgValue });
         console.log(`✅ Tx Sent: ${tx.hash}`);
         await tx.wait();
         console.log("🎉 Mined Successfully!");
