@@ -76,7 +76,7 @@ node ~/.openclaw/skills/synium-miner/synium.js challenge
     ```bash
     node ~/.openclaw/skills/synium-miner/synium.js verify "YOUR_SOLUTION_TEXT"
     ```
-    
+
 **REPORT FORMAT:**
 > **✅ Verification Successful**
 > - Signature: `0x...`
@@ -125,7 +125,7 @@ node ~/.openclaw/skills/synium-miner/synium.js claim <SIGNATURE> <NONCE> <ETH_AM
 ## 3. Manage Assets
 
 ### Unlocking Tokens
-To claim your vested rewards from LP positions:
+To claim your vested rewards from LP positions (Linear Release):
 ```bash
 node ~/.openclaw/skills/synium-miner/synium.js vest
 ```
@@ -134,6 +134,13 @@ node ~/.openclaw/skills/synium-miner/synium.js vest
 To see your balances and vesting schedules:
 ```bash
 node ~/.openclaw/skills/synium-miner/synium.js status
+```
+*Note: The "Fully Vested At" date indicates when 100% of tokens are released. You can claim unlocked portions daily via linear release.*
+
+### Check Claimable Amount
+To see how many vested tokens are currently unlocked and available to claim:
+```bash
+node ~/.openclaw/skills/synium-miner/synium.js claimable
 ```
 
 ---

@@ -124,6 +124,24 @@ contract SyniumToken is ERC20, Ownable, ReentrancyGuard, IERC721Receiver {
         return 0;
     }
 
+    function getClaimableVested(address user) public view returns (uint256) {
+        return _calculateClaimableVested(vestingSchedules[user]);
+    }
+
+    function _calculateClaimableVested(VestingSchedule memory schedule) internal view returns (uint256) {
+        if (block.timestamp < schedule.startTime) return 0;
+
+        uint256 timeElapsed = block.timestamp - schedule.startTime;
+        uint256 duration = schedule.endTime - schedule.startTime;
+
+        if (timeElapsed >= duration) {
+            return schedule.totalLocked - schedule.released;
+        } else {
+            uint256 vested = (schedule.totalLocked * timeElapsed) / duration;
+            return vested - schedule.released;
+        }
+    }
+
     // --- Core Mining ---
     function claim(
         bytes calldata signature,
@@ -280,24 +298,10 @@ contract SyniumToken is ERC20, Ownable, ReentrancyGuard, IERC721Receiver {
 
     function _internalClaimVested(address user) internal {
         VestingSchedule storage schedule = vestingSchedules[user];
-        if (block.timestamp < schedule.startTime) return;
-
-        uint256 timeElapsed = block.timestamp - schedule.startTime;
-        uint256 duration = schedule.endTime - schedule.startTime;
-
-        if (timeElapsed >= duration) {
-            uint256 payout = schedule.totalLocked - schedule.released;
-            if (payout > 0) {
-                schedule.released += payout;
-                _mint(user, payout);
-            }
-        } else {
-            uint256 vested = (schedule.totalLocked * timeElapsed) / duration;
-            uint256 payout = vested - schedule.released;
-            if (payout > 0) {
-                schedule.released += payout;
-                _mint(user, payout);
-            }
+        uint256 payout = _calculateClaimableVested(schedule);
+        if (payout > 0) {
+            schedule.released += payout;
+            _mint(user, payout);
         }
     }
 
