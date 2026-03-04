@@ -13,7 +13,7 @@ dotenv.config({ path: envPath });
 
 const CONFIG = {
     VERIFIER: "http://136.111.82.79",
-    CONTRACT: "0xd1AD2d7D4E5C3Ea02476D70494130772f4449A2B",
+    CONTRACT: "0xFC62570B59861F8E0DE767956FA521F8403F8b1c",
     LIKWID_HELPER: "0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013",
     RPC: "https://ethereum-sepolia-rpc.publicnode.com", 
     HOME: process.env.HOME || '.'
@@ -29,7 +29,8 @@ const ABIS = {
         "function claimVested() external",
         "function vestingSchedules(address) view returns (uint256 totalLocked, uint256 released, uint256 startTime, uint256 endTime, uint256 lpTokenId)",
         "function balanceOf(address) view returns (uint256)",
-        "function timeUntilNextClaim(address user) view returns (uint256)"
+        "function timeUntilNextClaim(address user) view returns (uint256)",
+        "function getClaimableVested(address user) view returns (uint256)"
     ],
     HELPER: [
         "function getPoolStateInfo(bytes32 poolId) view returns (tuple(uint128 totalSupply, uint32 lastUpdated, uint24 lpFee, uint24 marginFee, uint24 protocolFee, uint128 realReserve0, uint128 realReserve1, uint128 mirrorReserve0, uint128 mirrorReserve1, uint128 pairReserve0, uint128 pairReserve1, uint128 truncatedReserve0, uint128 truncatedReserve1, uint128 lendReserve0, uint128 lendReserve1, uint128 interestReserve0, uint128 interestReserve1, int128 insuranceFund0, int128 insuranceFund1, uint256 borrow0CumulativeLast, uint256 borrow1CumulativeLast, uint256 deposit0CumulativeLast, uint256 deposit1CumulativeLast))"
@@ -245,7 +246,6 @@ async function submit_claim(signature, nonce, ethAmount) {
 // ==========================================
 async function calc_lp_cost() {
     const provider = getProvider();
-    const wallet = getWalletInstance(provider); // Needed just for context? Actually provider is enough.
     
     const contract = new ethers.Contract(CONFIG.CONTRACT, ABIS.SYN, provider);
     const helper = new ethers.Contract(CONFIG.LIKWID_HELPER, ABIS.HELPER, provider);
@@ -256,6 +256,7 @@ async function calc_lp_cost() {
         const liquidPart = estReward * 200n / 10000n; // 2%
 
         // 2. Get Reserves
+        // Contract internally uses these standard fee/margin
         const poolKey = { currency0: "0x0000000000000000000000000000000000000000", currency1: CONFIG.CONTRACT, fee: 3000, marginFee: 3000 };
         const abiCoder = AbiCoder.defaultAbiCoder();
         const pid = keccak256(abiCoder.encode(["tuple(address currency0, address currency1, uint24 fee, uint24 marginFee)"], [[poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.marginFee]]));
@@ -339,6 +340,26 @@ async function claim_vested() {
     }
 }
 
+// ==========================================
+// 12. Check Claimable Vested (New Atomic Method)
+// ==========================================
+async function check_claimable() {
+    const provider = getProvider();
+    const wallet = getWalletInstance(provider);
+    if (!wallet) return console.log(JSON.stringify({ error: "No wallet" }));
+    
+    const contract = new ethers.Contract(CONFIG.CONTRACT, ABIS.SYN, wallet);
+    try {
+        const claimable = await contract.getClaimableVested(wallet.address);
+        console.log(JSON.stringify({ 
+            address: wallet.address,
+            claimableVested: ethers.formatEther(claimable) + " SYN"
+        }, null, 2));
+    } catch(e) {
+        console.log(JSON.stringify({ error: e.message }));
+    }
+}
+
 // --- CLI Router ---
 const args = process.argv.slice(2);
 const cmd = args[0];
@@ -353,10 +374,11 @@ switch(cmd) {
     case 'cooldown': check_cooldown(); break;
     case 'reward': get_reward(); break;
     case 'vest': claim_vested(); break;
+    case 'claimable': check_claimable(); break; // New command
     case 'claim': 
         // usage: node synium.js claim <sig> <nonce> [ethAmount]
         submit_claim(args[1], args[2], args[3]); 
         break;
     default:
-        console.log("Commands: check_wallet, create_wallet, challenge, verify, status, cost, cooldown, reward, vest, claim");
+        console.log("Commands: check_wallet, create_wallet, challenge, verify, status, cost, cooldown, reward, vest, claimable, claim");
 }
