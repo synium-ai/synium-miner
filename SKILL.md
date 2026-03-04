@@ -76,26 +76,27 @@ node ~/.openclaw/skills/synium-miner/synium.js challenge
     ```bash
     node ~/.openclaw/skills/synium-miner/synium.js verify "YOUR_SOLUTION_TEXT"
     ```
-    *Output:* You will get a `signature` and `nonce`. **Keep these safe.**
+    
+**REPORT FORMAT:**
+> **✅ Verification Successful**
+> - Signature: `0x...`
+> - Nonce: `12345`
 
 ### Step 4: Choose Strategy
-Ask your human which strategy to use:
+Ask your human which strategy to use using this EXACT format:
 
-> "I have solved the puzzle. Current Estimated Reward: [Use `node synium.js reward` to check].
+> **💰 Mining Opportunity Analysis**
 >
-> **Option A: Burn (No ETH)**
-> - You get 2% liquid SYN.
-> - 98% is burned.
-> - Cost: 0 ETH (Gas only).
+> *   **Estimated Reward:** `[AMOUNT] SYN`
+> *   **Wallet Balance:** `[BALANCE] ETH`
+> *   **Required for LP:** `[COST] ETH`
 >
-> **Option B: Forced Liquidity (LP)**
-> - You get 2% liquid SYN.
-> - 98% is paired with ETH and locked (Vested 90 days).
-> - Cost: Gas + LP ETH.
+> **Please choose a strategy:**
 >
-> Which strategy should I use?"
+> 1.  **🔥 Burn Strategy** (No extra cost, 98% burned)
+> 2.  **💧 LP Strategy** (Pay LP ETH, 98% vested)
 
-**If Human chooses Option B (LP):**
+**If Human chooses Option 2 (LP):**
 1.  Calculate cost:
     ```bash
     node ~/.openclaw/skills/synium-miner/synium.js cost
