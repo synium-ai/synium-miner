@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 // --- Configuration ---
 const CONFIG = {
     VERIFIER: "http://136.111.82.79",
-    CONTRACT: "0xc1D9dCa8e9bb2E78098468f93f705493acFE9210",
+    CONTRACT: "0xd1AD2d7D4E5C3Ea02476D70494130772f4449A2B",
     LIKWID_HELPER: "0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013",
     RPC: "https://ethereum-sepolia-rpc.publicnode.com", 
     HOME: process.env.HOME || '.'
