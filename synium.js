@@ -3,8 +3,14 @@ import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 
 // --- Configuration ---
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const envPath = path.resolve(__dirname, '.env');
+dotenv.config({ path: envPath });
+
 const CONFIG = {
     VERIFIER: "http://136.111.82.79",
     CONTRACT: "0xd1AD2d7D4E5C3Ea02476D70494130772f4449A2B",
@@ -20,6 +26,7 @@ const ABIS = {
     SYN: [
         "function getEstimatedReward() view returns (uint256)",
         "function claim(bytes signature, uint256 nonce) external payable",
+        "function claimVested() external",
         "function vestingSchedules(address) view returns (uint256 totalLocked, uint256 released, uint256 startTime, uint256 endTime, uint256 lpTokenId)",
         "function balanceOf(address) view returns (uint256)",
         "function timeUntilNextClaim(address user) view returns (uint256)"
@@ -29,152 +36,327 @@ const ABIS = {
     ]
 };
 
-// --- Wallet Management ---
-async function getWallet(provider) {
-    const dir = path.dirname(WALLET_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+// --- Helper: Get Provider ---
+function getProvider() {
+    return new ethers.JsonRpcProvider(CONFIG.RPC);
+}
 
+// --- Helper: Get Wallet Instance (Read-only check) ---
+function getWalletInstance(provider) {
     if (fs.existsSync(WALLET_FILE)) {
         try {
             const json = fs.readFileSync(WALLET_FILE, 'utf8');
             return new ethers.Wallet(JSON.parse(json).privateKey, provider);
-        } catch (e) { console.error("Wallet load error:", e.message); }
+        } catch (e) { return null; }
     }
-    
-    const wallet = ethers.Wallet.createRandom();
-    const data = { address: wallet.address, privateKey: wallet.privateKey, mnemonic: wallet.mnemonic.phrase };
-    fs.writeFileSync(WALLET_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
-    return wallet.connect(provider);
+    return null;
 }
 
-// --- Command: Check Status ---
-async function status() {
-    const provider = new ethers.JsonRpcProvider(CONFIG.RPC);
-    const wallet = await getWallet(provider);
-    const contract = new ethers.Contract(CONFIG.CONTRACT, ABIS.SYN, wallet);
+// ==========================================
+// 1. Check Wallet Existence
+// ==========================================
+async function check_wallet() {
+    const provider = getProvider();
+    const wallet = getWalletInstance(provider);
     
-    console.log(`Checking status for: ${wallet.address}`);
+    if (wallet) {
+        const bal = await provider.getBalance(wallet.address);
+        console.log(JSON.stringify({
+            exists: true,
+            address: wallet.address,
+            balance: ethers.formatEther(bal) + " ETH",
+            path: WALLET_FILE
+        }, null, 2));
+    } else {
+        console.log(JSON.stringify({
+            exists: false,
+            message: "No wallet found. Use 'create_wallet' to generate one."
+        }, null, 2));
+    }
+}
 
-    let bal = await provider.getBalance(wallet.address);
-    let syn = 0n;
-    let vest = "None";
-    let cooldown = 0n;
-    
-    try { syn = await contract.balanceOf(wallet.address); } catch(e){}
-    try { cooldown = await contract.timeUntilNextClaim(wallet.address); } catch(e){}
-    try { 
-        const v = await contract.vestingSchedules(wallet.address);
-        if (v.totalLocked > 0n) {
-            vest = { 
-                locked: ethers.formatEther(v.totalLocked), 
-                released: ethers.formatEther(v.released),
-                endTime: new Date(Number(v.endTime) * 1000).toISOString()
-            };
-        }
-    } catch(e) {}
+// ==========================================
+// 2. Create Wallet
+// ==========================================
+async function create_wallet() {
+    const provider = getProvider();
+    let wallet = getWalletInstance(provider);
 
-    let challenge = "Offline";
+    if (wallet) {
+        const bal = await provider.getBalance(wallet.address);
+        console.log(JSON.stringify({
+            status: "skipped",
+            message: "Wallet already exists. Will not overwrite.",
+            address: wallet.address,
+            balance: ethers.formatEther(bal) + " ETH"
+        }, null, 2));
+    } else {
+        // Ensure dir
+        const dir = path.dirname(WALLET_FILE);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+        const newWallet = ethers.Wallet.createRandom();
+        const data = { 
+            address: newWallet.address, 
+            privateKey: newWallet.privateKey, 
+            mnemonic: newWallet.mnemonic.phrase 
+        };
+        fs.writeFileSync(WALLET_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+        
+        console.log(JSON.stringify({
+            status: "created",
+            address: newWallet.address,
+            balance: "0.0 ETH",
+            path: WALLET_FILE
+        }, null, 2));
+    }
+}
+
+// ==========================================
+// 3. Get Challenge
+// ==========================================
+async function get_challenge() {
+    const provider = getProvider();
+    const wallet = getWalletInstance(provider);
+    if (!wallet) return console.log(JSON.stringify({ error: "No wallet found" }));
+
     try {
         const res = await axios.get(`${CONFIG.VERIFIER}/challenge?address=${wallet.address}`);
-        challenge = res.data;
-    } catch(e){ console.log("Verifier Error:", e.message); }
+        console.log(JSON.stringify(res.data, null, 2));
+    } catch (e) {
+        console.log(JSON.stringify({ error: "Verifier unreachable" }));
+    }
+}
+
+// ==========================================
+// 4. Verify Solution
+// ==========================================
+async function verify_solution(answer) {
+    if (!answer) return console.log(JSON.stringify({ error: "Missing answer" }));
+    
+    const provider = getProvider();
+    const wallet = getWalletInstance(provider);
+    if (!wallet) return console.log(JSON.stringify({ error: "No wallet found" }));
+
+    try {
+        const res = await axios.post(`${CONFIG.VERIFIER}/verify`, { 
+            wallet_address: wallet.address, 
+            answer_text: answer 
+        });
+        
+        if (res.data.success) {
+            let sig = res.data.signature;
+            if (!sig.startsWith('0x')) sig = '0x' + sig;
+            
+            console.log(JSON.stringify({
+                status: "success",
+                signature: sig,
+                nonce: res.data.nonce,
+                note: "Save these values for the claim step!"
+            }, null, 2));
+        } else {
+            console.log(JSON.stringify({ status: "failed", error: "Verification rejected" }));
+        }
+    } catch (e) {
+        console.log(JSON.stringify({ status: "error", message: e.response?.data || e.message }));
+    }
+}
+
+// ==========================================
+// 5. Get Status (Detailed)
+// ==========================================
+async function get_status() {
+    const provider = getProvider();
+    const wallet = getWalletInstance(provider);
+    if (!wallet) return console.log(JSON.stringify({ error: "No wallet found" }));
+
+    const contract = new ethers.Contract(CONFIG.CONTRACT, ABIS.SYN, wallet);
+    
+    const ethBal = await provider.getBalance(wallet.address);
+    let synBal = 0n;
+    let cooldown = 0n;
+    let vesting = null;
+
+    try { synBal = await contract.balanceOf(wallet.address); } catch(e){}
+    try { cooldown = await contract.timeUntilNextClaim(wallet.address); } catch(e){}
+    try {
+        const v = await contract.vestingSchedules(wallet.address);
+        vesting = {
+            totalLocked: ethers.formatEther(v.totalLocked),
+            released: ethers.formatEther(v.released),
+            endTime: new Date(Number(v.endTime) * 1000).toISOString()
+        };
+    } catch(e) {}
+
+    let nextClaimTime = "Now";
+    if (cooldown > 0n) {
+        // 1 block ~= 12 seconds
+        const secondsWait = Number(cooldown) * 12;
+        const targetDate = new Date(Date.now() + secondsWait * 1000);
+        nextClaimTime = targetDate.toISOString();
+    }
 
     console.log(JSON.stringify({
         address: wallet.address,
-        eth: ethers.formatEther(bal),
-        syn: ethers.formatEther(syn),
-        cooldownBlocks: cooldown.toString(),
-        readyToMine: cooldown === 0n,
-        vesting: vest,
-        challenge: challenge
+        eth: ethers.formatEther(ethBal),
+        syn: ethers.formatEther(synBal),
+        mining: {
+            canMine: cooldown === 0n,
+            blocksToWait: cooldown.toString(),
+            nextClaimTime: nextClaimTime
+        },
+        vesting: vesting
     }, null, 2));
 }
 
-// --- Command: Submit Solution ---
-async function mine(answer) {
-    if (!answer) return console.log("Error: Missing answer argument");
+// ==========================================
+// 6. Submit Claim (Atomic Transaction)
+// ==========================================
+async function submit_claim(signature, nonce, ethAmount) {
+    if (!signature || !nonce) return console.log(JSON.stringify({ error: "Missing signature or nonce" }));
     
-    const provider = new ethers.JsonRpcProvider(CONFIG.RPC);
-    const wallet = await getWallet(provider);
+    const provider = getProvider();
+    const wallet = getWalletInstance(provider);
+    if (!wallet) return console.log(JSON.stringify({ error: "No wallet found" }));
+    
     const contract = new ethers.Contract(CONFIG.CONTRACT, ABIS.SYN, wallet);
+    const msgValue = ethAmount ? ethers.parseEther(ethAmount) : 0n;
 
-    // Check cooldown
-    try {
-        const cooldown = await contract.timeUntilNextClaim(wallet.address);
-        if (cooldown > 0n) {
-            return console.log(`⏳ Mining Cooldown Active. Wait ${cooldown} blocks.`);
-        }
-    } catch(e) {}
+    console.log(`Submitting tx... Sig: ${signature.slice(0,10)}..., Nonce: ${nonce}, Val: ${ethAmount || 0}`);
 
-    console.log(`Mining initiated for ${wallet.address}...`);
-    
-    // 1. Verify Off-chain
-    let sig, nonce;
     try {
-        const res = await axios.post(`${CONFIG.VERIFIER}/verify`, { wallet_address: wallet.address, answer_text: answer });
-        if(!res.data.success) throw new Error("Verification failed: " + JSON.stringify(res.data));
+        const tx = await contract.claim(signature, nonce, { value: msgValue });
+        console.log(JSON.stringify({
+            status: "submitted",
+            hash: tx.hash,
+            message: "Waiting for confirmation..."
+        }, null, 2));
         
-        sig = res.data.signature;
-        if (!sig.startsWith('0x')) sig = '0x' + sig; 
-        nonce = res.data.nonce;
-        console.log("✅ Verification successful.");
-    } catch(e) { return console.log("❌ Verify Error:", e.response?.data || e.message); }
-
-    // 2. DeFi Logic: Calculate LP Requirement
-    // Note: PoolKey construction is solely for PoolId calculation now. Contract has it built-in.
-    const poolKey = { currency0: "0x0000000000000000000000000000000000000000", currency1: CONFIG.CONTRACT, fee: 3000, marginFee: 3000 };
-    const abiCoder = AbiCoder.defaultAbiCoder();
-    const pid = keccak256(abiCoder.encode(["tuple(address currency0, address currency1, uint24 fee, uint24 marginFee)"], [[poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.marginFee]]));
-    
-    const helper = new ethers.Contract(CONFIG.LIKWID_HELPER, ABIS.HELPER, provider);
-    let msgValue = 0n, strategy = "Burn (Free)";
-
-    try {
-        console.log("🔍 Querying Liquidity Pool...");
-        const est = await contract.getEstimatedReward();
-        const liqPart = est * 200n / 10000n; // 2% Liquid
-        
-        const state = await helper.getPoolStateInfo(pid);
-        const r0 = BigInt(state.pairReserve0);
-        const r1 = BigInt(state.pairReserve1);
-        
-        console.log(`   Reserves: ${ethers.formatEther(r0)} ETH / ${ethers.formatEther(r1)} SYN`);
-
-        if (r1 > 0n) {
-            let ethNeeded = liqPart * r0 / r1;
-            
-            // Sanity Check
-            if (ethNeeded > ethers.parseEther("10")) {
-                console.log("⚠️ Anomaly: ETH cost too high. Ignoring LP.");
-                ethNeeded = 0n;
-            }
-
-            const bal = await provider.getBalance(wallet.address);
-            console.log(`   Cost: ${ethers.formatEther(ethNeeded)} ETH | Balance: ${ethers.formatEther(bal)} ETH`);
-
-            if (ethNeeded > 0n && bal > ethNeeded + ethers.parseEther("0.005")) {
-                strategy = "Forced Liquidity (LP + Vesting)";
-                msgValue = ethNeeded;
-            }
-        }
-    } catch(e) { console.log("⚠️ Helper Error (Pool might be empty):", e.message); }
-
-    // 3. Submit Transaction
-    try {
-        console.log(`🚀 Submitting Claim... Strategy: ${strategy}`);
-        // New: claim(signature, nonce) - No poolKey params!
-        const tx = await contract.claim(sig, nonce, { value: msgValue });
-        console.log(`✅ Tx Sent: ${tx.hash}`);
         await tx.wait();
-        console.log("🎉 Mined Successfully!");
-    } catch(e) { 
+        console.log(JSON.stringify({ status: "confirmed", hash: tx.hash }));
+    } catch (e) {
         const reason = e.shortMessage || e.message;
-        console.log(`❌ Tx Failed: ${reason}`); 
+        console.log(JSON.stringify({ status: "failed", error: reason }));
     }
 }
 
-// CLI Router
+// ==========================================
+// 7. Calculate LP Cost
+// ==========================================
+async function calc_lp_cost() {
+    const provider = getProvider();
+    const wallet = getWalletInstance(provider); // Needed just for context? Actually provider is enough.
+    
+    const contract = new ethers.Contract(CONFIG.CONTRACT, ABIS.SYN, provider);
+    const helper = new ethers.Contract(CONFIG.LIKWID_HELPER, ABIS.HELPER, provider);
+
+    try {
+        // 1. Get Reward
+        const estReward = await contract.getEstimatedReward();
+        const liquidPart = estReward * 200n / 10000n; // 2%
+
+        // 2. Get Reserves
+        const poolKey = { currency0: "0x0000000000000000000000000000000000000000", currency1: CONFIG.CONTRACT, fee: 3000, marginFee: 3000 };
+        const abiCoder = AbiCoder.defaultAbiCoder();
+        const pid = keccak256(abiCoder.encode(["tuple(address currency0, address currency1, uint24 fee, uint24 marginFee)"], [[poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.marginFee]]));
+        
+        const state = await helper.getPoolStateInfo(pid);
+        const r0 = BigInt(state.pairReserve0); // ETH
+        const r1 = BigInt(state.pairReserve1); // SYN
+
+        let ethCost = 0n;
+        if (r1 > 0n) {
+            ethCost = liquidPart * r0 / r1;
+            // Sanity check
+            if (ethCost > ethers.parseEther("10")) ethCost = 0n; // Error case
+        }
+
+        console.log(JSON.stringify({
+            estimatedReward: ethers.formatEther(estReward),
+            liquidPart: ethers.formatEther(liquidPart),
+            poolReserves: { eth: ethers.formatEther(r0), syn: ethers.formatEther(r1) },
+            lpCostETH: ethers.formatEther(ethCost)
+        }, null, 2));
+
+    } catch (e) {
+        console.log(JSON.stringify({ error: "Failed to calc cost", details: e.message }));
+    }
+}
+
+// ==========================================
+// 9. Check Cooldown (Simple)
+// ==========================================
+async function check_cooldown() {
+    const provider = getProvider();
+    const wallet = getWalletInstance(provider);
+    if (!wallet) return console.log(JSON.stringify({ error: "No wallet" }));
+    
+    const contract = new ethers.Contract(CONFIG.CONTRACT, ABIS.SYN, wallet);
+    try {
+        const blocks = await contract.timeUntilNextClaim(wallet.address);
+        console.log(JSON.stringify({
+            canMine: blocks === 0n,
+            blocksRemaining: blocks.toString(),
+            secondsRemaining: (Number(blocks) * 12).toString()
+        }, null, 2));
+    } catch(e) {
+        console.log(JSON.stringify({ error: e.message }));
+    }
+}
+
+// ==========================================
+// 10. Get Estimated Reward (Simple)
+// ==========================================
+async function get_reward() {
+    const provider = getProvider();
+    const contract = new ethers.Contract(CONFIG.CONTRACT, ABIS.SYN, provider);
+    try {
+        const rw = await contract.getEstimatedReward();
+        console.log(JSON.stringify({ reward: ethers.formatEther(rw) }));
+    } catch(e) {
+        console.log(JSON.stringify({ error: e.message }));
+    }
+}
+
+// ==========================================
+// 11. Claim Vested
+// ==========================================
+async function claim_vested() {
+    const provider = getProvider();
+    const wallet = getWalletInstance(provider);
+    if (!wallet) return console.log(JSON.stringify({ error: "No wallet" }));
+    
+    const contract = new ethers.Contract(CONFIG.CONTRACT, ABIS.SYN, wallet);
+    console.log("Claiming vested tokens...");
+    
+    try {
+        const tx = await contract.claimVested();
+        console.log(JSON.stringify({ status: "submitted", hash: tx.hash }));
+        await tx.wait();
+        console.log(JSON.stringify({ status: "confirmed" }));
+    } catch(e) {
+        console.log(JSON.stringify({ status: "failed", error: e.shortMessage || e.message }));
+    }
+}
+
+// --- CLI Router ---
 const args = process.argv.slice(2);
-if (args[0] === 'status') status();
-else if (args[0] === 'mine') mine(args[1]);
-else console.log("Usage: node synium.js [status|mine <answer>]");
+const cmd = args[0];
+
+switch(cmd) {
+    case 'check_wallet': check_wallet(); break;
+    case 'create_wallet': create_wallet(); break;
+    case 'challenge': get_challenge(); break;
+    case 'verify': verify_solution(args[1]); break; // args[1] is answer
+    case 'status': get_status(); break;
+    case 'cost': calc_lp_cost(); break;
+    case 'cooldown': check_cooldown(); break;
+    case 'reward': get_reward(); break;
+    case 'vest': claim_vested(); break;
+    case 'claim': 
+        // usage: node synium.js claim <sig> <nonce> [ethAmount]
+        submit_claim(args[1], args[2], args[3]); 
+        break;
+    default:
+        console.log("Commands: check_wallet, create_wallet, challenge, verify, status, cost, cooldown, reward, vest, claim");
+}
