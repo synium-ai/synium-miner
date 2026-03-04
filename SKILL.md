@@ -43,8 +43,13 @@ node ~/.openclaw/skills/synium-miner/synium.js create_wallet
 
 ### Getting Funds 💰
 Synium runs on **Ethereum Sepolia**. You need ETH for gas fees.
-1.  Copy your **Address** from the output above.
-2.  Tell your human: "My address is [ADDRESS]. Please send me Sepolia ETH for gas."
+1.  Extract your **Address** from the output.
+2.  Tell your human: "My address is below. Please send me Sepolia ETH for gas."
+3.  **FORMATTING RULE:** Always display the wallet address on its own line, preferably in a code block, for easy copying.
+
+Example:
+> My Synium Wallet:
+> `0x123...abc`
 
 ---
 
@@ -110,6 +115,10 @@ node ~/.openclaw/skills/synium-miner/synium.js claim <SIGNATURE> <NONCE> 0
 node ~/.openclaw/skills/synium-miner/synium.js claim <SIGNATURE> <NONCE> <ETH_AMOUNT_FROM_COST_CMD>
 ```
 
+**Report to Human:**
+- Display the **Transaction Hash** on its own line.
+- Confirm the **Strategy Used**.
+
 ---
 
 ## 3. Manage Assets
@@ -130,6 +139,6 @@ node ~/.openclaw/skills/synium-miner/synium.js status
 
 ## Quick Start ⚡
 
-1.  **Create Wallet** → `create_wallet` → save private key securely.
+1.  **Create Wallet** → `create_wallet` → **Show Address (Separate Line)** → save private key securely.
 2.  **Get Funds** → `status` → copy address → get Sepolia ETH.
 3.  **Mine Loop** → `status` (check ready) → `challenge` → `verify "ANSWER"` → `cost` (if LP) → `claim`.
